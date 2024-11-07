@@ -16,3 +16,4 @@ Cargo.lock
 
 #ide
 .idea/
+node_modules/

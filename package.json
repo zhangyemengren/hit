@@ -1,0 +1,24 @@
+{
+  "name": "zymrhit",
+  "version": "1.0.2",
+  "description": "",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "bin": {
+    "zymrhit": "./bin/zymrhit"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhangyemengren/hit.git"
+  },
+  "author": "zymr",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/zhangyemengren/hit/issues"
+  },
+  "homepage": "https://github.com/zhangyemengren/hit#readme"
+}
