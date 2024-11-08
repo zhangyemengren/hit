@@ -2,7 +2,7 @@
 name = "zymrhit"
 version = "0.1.1"
 edition = "2021"
-authors = ["624593758@q.com"]
+authors = ["624593758@qq.com"]
 description = "http load generator"
 homepage = "https://github.com/zhangyemengren/hit#readme"
 repository = "https://github.com/zhangyemengren/hit"
