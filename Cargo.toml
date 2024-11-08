@@ -1,6 +1,6 @@
 [package]
 name = "zymrhit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["624593758@q.com"]
 description = "http load generator"
@@ -9,8 +9,9 @@ repository = "https://github.com/zhangyemengren/hit"
 license = "MIT"
 
 [dependencies]
-clap = "4.5.20"
+clap = { version = "4.5.20", features = ["derive"] }
 crossterm = "0.28.1"
 ratatui = "0.29.0"
 reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-util = "0.7.12"
