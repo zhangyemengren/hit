@@ -1,7 +1,7 @@
 use clap::Parser;
 use reqwest::{Client, ClientBuilder};
 use std::{
-    process,
+    cmp, process,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -109,7 +109,7 @@ impl Runner {
         for handle in handles {
             handle.await.unwrap();
         }
-        println!("Done!");
+        println!("Done! Duration: {:?}", self.now.elapsed());
     }
     fn is_done(&self) -> bool {
         if let Some(duration) = self.args.duration {
@@ -127,16 +127,20 @@ impl Runner {
             .store(new_average_duration, Ordering::SeqCst);
     }
     fn diff_qps_duration(&self) -> u64 {
-        let average_duration = self.average_duration.load(Ordering::SeqCst) as i128;
+        let average_duration = self.average_duration.load(Ordering::SeqCst);
+        let request_count = self.request_count.load(Ordering::SeqCst);
+        let average_all =
+            average_duration / cmp::min(self.args.max_concurrent as u64, request_count);
         let Some(qps) = self.args.qps else {
             return 0;
         };
-        let diff = (1000 / qps) as i128 - average_duration;
+        let average_qps = 1000 / qps;
+        let diff = average_qps.checked_sub(average_all).unwrap_or(0);
         // 除数取整最大误差为1 忽略
         if diff <= 1 {
             0
         } else {
-            diff as u64
+            diff
         }
     }
 }
