@@ -1,6 +1,6 @@
 [package]
 name = "zymrhit"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["624593758@qq.com"]
 description = "http load generator"
@@ -10,7 +10,8 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
-crossterm = "0.28.1"
+crossterm = {version = "0.28", features = ["event-stream"]}
+futures = "0.3.31"
 ratatui = "0.29.0"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }

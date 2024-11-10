@@ -1,3 +1,4 @@
+use crate::monitor::Monitor;
 use clap::Parser;
 use reqwest::{Client, ClientBuilder};
 use std::{
@@ -5,7 +6,8 @@ use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
-    },
+    }
+    ,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -66,8 +68,23 @@ impl Runner {
     pub async fn run(&self) {
         let cancellation_token = CancellationToken::new();
         let mut handles = vec![];
+        let (m_tx, m_rx) = mpsc::unbounded_channel::<bool>();
+
+        let mut monitor = Monitor::new(m_rx);
+        let inner_rx = monitor.get_receiver();
+        // 执行monitor任务
+        let m_handle = tokio::spawn(async move {
+            monitor.run().await;
+        });
         loop {
+            // 结束时 取消其他任务
             if self.is_done() {
+                cancellation_token.cancel();
+                m_tx.send(true).unwrap();
+                break;
+            }
+            // 原始终端只能通过monitor模块监听退出信号
+            if *inner_rx.borrow() {
                 cancellation_token.cancel();
                 break;
             }
@@ -77,6 +94,7 @@ impl Runner {
             let url = self.args.url.clone();
             let token = cancellation_token.clone();
             let diff = self.diff_qps_duration();
+            // 限制请求频率
             if diff > 0 {
                 tokio::time::sleep(Duration::from_millis(diff)).await;
             }
@@ -88,6 +106,7 @@ impl Runner {
                     }
                     _ = token.cancelled() => {}
                     _ = async {
+                        // 限制并发数
                         let _permit = semaphore.acquire().await.unwrap();
                         request_count.fetch_add(1, Ordering::SeqCst);
                         let start = Instant::now();
@@ -97,7 +116,6 @@ impl Runner {
                             .unwrap();
                         let duration = start.elapsed().as_millis() as u64;
                         tx.send(duration).unwrap();
-                        tokio::time::sleep(Duration::from_secs(1)).await;
                         drop(_permit);
                     } => {}
                 }
@@ -109,6 +127,7 @@ impl Runner {
         for handle in handles {
             handle.await.unwrap();
         }
+        m_handle.await.unwrap();
         println!("Done! Duration: {:?}", self.now.elapsed());
     }
     fn is_done(&self) -> bool {
@@ -129,8 +148,8 @@ impl Runner {
     fn diff_qps_duration(&self) -> u64 {
         let average_duration = self.average_duration.load(Ordering::SeqCst);
         let request_count = self.request_count.load(Ordering::SeqCst);
-        let average_all =
-            average_duration / cmp::min(self.args.max_concurrent as u64, request_count);
+        let average_all = average_duration
+            / cmp::max(1, cmp::min(self.args.max_concurrent as u64, request_count));
         let Some(qps) = self.args.qps else {
             return 0;
         };
