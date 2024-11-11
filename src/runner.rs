@@ -68,9 +68,10 @@ impl Runner {
     pub async fn run(&self) {
         let cancellation_token = CancellationToken::new();
         let mut handles = vec![];
-        let (m_tx, m_rx) = mpsc::unbounded_channel::<bool>();
-
-        let mut monitor = Monitor::new(m_rx);
+        let (m_tx, m_rx) = mpsc::unbounded_channel::<Option< u64>>();
+        let duration = self.args.duration;
+        let max_count = self.args.n_requests;
+        let mut monitor = Monitor::new(self.now.clone(),m_rx, max_count, duration);
         let inner_rx = monitor.get_receiver();
         // 执行monitor任务
         let m_handle = tokio::spawn(async move {
@@ -80,10 +81,10 @@ impl Runner {
             // 结束时 取消其他任务
             if self.is_done() {
                 cancellation_token.cancel();
-                m_tx.send(true).unwrap();
+                m_tx.send(None).unwrap();
                 break;
             }
-            // 原始终端只能通过monitor模块监听退出信号
+            // 接收channel返回 原始终端只能通过monitor模块监听退出信号
             if *inner_rx.borrow() {
                 cancellation_token.cancel();
                 break;
@@ -91,6 +92,7 @@ impl Runner {
             let client = Arc::clone(&self.client);
             let semaphore = Arc::clone(&self.semaphore);
             let request_count = Arc::clone(&self.request_count);
+            let m_tx = m_tx.clone();
             let url = self.args.url.clone();
             let token = cancellation_token.clone();
             let diff = self.diff_qps_duration();
@@ -116,6 +118,7 @@ impl Runner {
                             .unwrap();
                         let duration = start.elapsed().as_millis() as u64;
                         tx.send(duration).unwrap();
+                        m_tx.send(Some(1)).unwrap();
                         drop(_permit);
                     } => {}
                 }

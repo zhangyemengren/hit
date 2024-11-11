@@ -1,8 +1,8 @@
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
-use futures::{StreamExt};
+use futures::StreamExt;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{
-    Constraint::{Length, Min, Ratio},
+    Constraint::Length,
     Layout, Rect,
 };
 use ratatui::style::palette::tailwind;
@@ -10,39 +10,45 @@ use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Padding, Widget};
 use ratatui::DefaultTerminal;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
 const CUSTOM_LABEL_COLOR: Color = tailwind::SLATE.c200;
 const GAUGE_COLOR: Color = tailwind::GREEN.c800;
 
 pub struct Monitor {
+    now: Instant,
     terminal: DefaultTerminal,
-    rx: UnboundedReceiver<bool>,
+    rx: UnboundedReceiver<Option<u64>>,
     inner_tx: watch::Sender<bool>,
     inner_rx: watch::Receiver<bool>,
-    progress: f64,
+    widget: MonitorWidget,
 }
 
 impl Monitor {
     const FRAMES_PER_SECOND: f32 = 60.0;
 
-    pub fn new(rx: UnboundedReceiver<bool>) -> Self {
+    pub fn new(
+        now: Instant,
+        rx: UnboundedReceiver<Option<u64>>,
+        max_count: u64,
+        duration: Option<u64>,
+    ) -> Self {
         let (inner_tx, inner_rx) = watch::channel(false);
         let terminal = ratatui::init();
+        let widget = MonitorWidget::new(0, max_count, duration);
         Monitor {
+            now,
             terminal,
             rx,
             inner_rx,
             inner_tx,
-            progress: 10.0,
+            widget,
         }
     }
 
     pub fn draw(&mut self) {
-        let widget = MonitorWidget {
-            progress: self.progress,
-        };
+        let widget = self.widget.clone();
         self.terminal
             .draw(|frame| {
                 frame.render_widget(widget, frame.area());
@@ -56,22 +62,28 @@ impl Monitor {
     pub async fn run(&mut self) {
         self.terminal.clear().unwrap();
         let mut events = EventStream::new();
+        let mut tick_now = self.now.clone();
         loop {
             let period = Duration::from_secs_f32(1.0 / Self::FRAMES_PER_SECOND);
             let mut interval = tokio::time::interval(period);
             let tx = self.inner_tx.clone();
             tokio::select! {
+                 // 如果
                  _ = interval.tick() => {
-                    self.draw();
-
-                    self.progress += 1.0;
-                    if self.progress > 100.0 {
-                        self.progress = 100.0;
+                    if tick_now.elapsed().as_secs() >= 1 {
+                        tick_now = Instant::now();
+                        self.widget.seconds += 1;
                     }
+                    self.draw();
                 }
-                _ = self.rx.recv() => {
-                    break;
+                // channel
+                Some(x) = self.rx.recv() => {
+                    if let None = x{
+                        break;
+                    }
+                    self.widget.count += 1;
                 }
+                // 事件
                 Some(Ok(event)) = events.next() => {
                     if let Some(_) = self.handle_event(&event) {
                         tx.send(true).unwrap();
@@ -94,11 +106,23 @@ impl Monitor {
     }
 }
 
+#[derive(Clone)]
 struct MonitorWidget {
-    progress: f64,
+    count: u64,
+    seconds: u64,
+    max_count: u64,
+    duration: Option<u64>,
 }
 
 impl MonitorWidget {
+    pub fn new(seconds: u64, max_count: u64, duration: Option<u64>) -> Self {
+        MonitorWidget {
+            count: 0,
+            seconds,
+            max_count,
+            duration,
+        }
+    }
     pub fn render_title<'a>(&self, title: &'a str) -> Block<'a> {
         let title = Line::from(title).centered();
         Block::default()
@@ -108,14 +132,27 @@ impl MonitorWidget {
             .style(Style::default().fg(CUSTOM_LABEL_COLOR))
     }
     pub fn render_gauge<'a>(&self, title: Block<'a>) -> Gauge<'a> {
+        let (text, mut ratio) = match self.duration {
+            Some(duration) => (
+                format!("{}/{}", self.seconds, duration),
+                self.seconds as f64 / duration as f64,
+            ),
+            None => (
+                format!("{}/{}", self.count, self.max_count),
+                self.count as f64 / self.max_count as f64,
+            ),
+        };
         let label = Span::styled(
-            format!("{:.1}/100", self.progress),
+            text,
             Style::default().italic().bold().fg(CUSTOM_LABEL_COLOR),
         );
+        if ratio > 1.0 {
+            ratio = 1.0;
+        }
         Gauge::default()
             .block(title)
             .gauge_style(Style::default().fg(GAUGE_COLOR))
-            .ratio(self.progress / 100.0)
+            .ratio(ratio)
             .label(label)
     }
 }
@@ -124,19 +161,13 @@ impl Widget for MonitorWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let layout = Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
-            .constraints([Length(2), Min(0), Length(1)].as_ref())
+            .constraints([Length(6)])
             .split(area);
-        let gauge_area = layout[1];
-
-        let gauge_layout = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([Ratio(1, 4)].as_ref())
-            .split(gauge_area);
-        let gauge_area = gauge_layout[0];
+        let gauge_area = layout[0];
 
         let title = self.render_title("Progress Bar");
-
         let gauge = self.render_gauge(title);
+
         gauge.render(gauge_area, buf);
     }
 }
