@@ -1,10 +1,8 @@
+use std::error::Error;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{
-    Constraint::Length,
-    Layout, Rect,
-};
+use ratatui::layout::{Constraint::Length, Layout, Rect};
 use ratatui::style::palette::tailwind;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -47,13 +45,13 @@ impl Monitor {
         }
     }
 
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self) -> Result<(), Box<dyn Error>> {
         let widget = self.widget.clone();
         self.terminal
             .draw(|frame| {
                 frame.render_widget(widget, frame.area());
-            })
-            .unwrap();
+            })?;
+        Ok(())
     }
     pub fn get_receiver(&self) -> watch::Receiver<bool> {
         self.inner_rx.clone()
@@ -74,7 +72,7 @@ impl Monitor {
                         tick_now = Instant::now();
                         self.widget.seconds += 1;
                     }
-                    self.draw();
+                    self.draw().unwrap_or_else(|_| {});
                 }
                 // channel
                 Some(x) = self.rx.recv() => {

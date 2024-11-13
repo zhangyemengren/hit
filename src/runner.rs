@@ -6,8 +6,7 @@ use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
-    }
-    ,
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -17,7 +16,6 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 const DEFAULT_MAX_CONCURRENT: usize = 50;
-const DEFAULT_REQUEST_TIMEOUT: u64 = 1;
 const DEFAULT_REQUESTS: u64 = 200;
 
 #[derive(Parser, Debug)]
@@ -35,6 +33,9 @@ pub struct Args {
     /// Max concurrent requests
     #[arg(short, default_value_t = DEFAULT_MAX_CONCURRENT)]
     max_concurrent: usize,
+    /// Timeout for each request
+    #[arg(short, long)]
+    timeout: Option<u64>,
     /// Target url
     url: String,
 }
@@ -50,13 +51,15 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(args: Args) -> Self {
+        let mut client = ClientBuilder::new();
+        if let Some(timeout) = args.timeout {
+            client = client.timeout(Duration::from_secs(timeout));
+        }
+        let client = client.build().unwrap();
         Runner {
             now: Instant::now(),
             client: Arc::new(
-                ClientBuilder::new()
-                    .timeout(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT))
-                    .build()
-                    .unwrap(),
+                client
             ),
             semaphore: Arc::new(Semaphore::new(args.max_concurrent)),
             request_count: Arc::new(AtomicU64::new(0)),
@@ -68,10 +71,10 @@ impl Runner {
     pub async fn run(&self) {
         let cancellation_token = CancellationToken::new();
         let mut handles = vec![];
-        let (m_tx, m_rx) = mpsc::unbounded_channel::<Option< u64>>();
+        let (m_tx, m_rx) = mpsc::unbounded_channel::<Option<u64>>();
         let duration = self.args.duration;
         let max_count = self.args.n_requests;
-        let mut monitor = Monitor::new(self.now.clone(),m_rx, max_count, duration);
+        let mut monitor = Monitor::new(self.now.clone(), m_rx, max_count, duration);
         let inner_rx = monitor.get_receiver();
         // 执行monitor任务
         let m_handle = tokio::spawn(async move {
@@ -112,10 +115,11 @@ impl Runner {
                         let _permit = semaphore.acquire().await.unwrap();
                         request_count.fetch_add(1, Ordering::SeqCst);
                         let start = Instant::now();
-                        let _res = client.get(url)
+                        match client.get(url)
                             .send()
-                            .await
-                            .unwrap();
+                            .await{
+                            _ => {},
+                        }
                         let duration = start.elapsed().as_millis() as u64;
                         tx.send(duration).unwrap();
                         m_tx.send(Some(1)).unwrap();
