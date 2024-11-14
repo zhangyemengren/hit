@@ -49,7 +49,8 @@ impl Monitor {
         let widget = self.widget.clone();
         self.terminal
             .draw(|frame| {
-                frame.render_widget(widget, frame.area());
+                let area = frame.area();
+                frame.render_widget(widget, area);
             })?;
         Ok(())
     }
@@ -121,7 +122,7 @@ impl MonitorWidget {
             duration,
         }
     }
-    pub fn render_title<'a>(&self, title: &'a str) -> Block<'a> {
+    pub fn get_title<'a>(&self, title: &'a str) -> Block<'a> {
         let title = Line::from(title).centered();
         Block::default()
             .borders(Borders::NONE)
@@ -129,7 +130,7 @@ impl MonitorWidget {
             .title(title)
             .style(Style::default().fg(CUSTOM_LABEL_COLOR))
     }
-    pub fn render_gauge<'a>(&self, title: Block<'a>) -> Gauge<'a> {
+    pub fn get_gauge<'a>(&self, title: Block<'a>) -> Gauge<'a> {
         let (text, mut ratio) = match self.duration {
             Some(duration) => (
                 format!("{}/{}", self.seconds, duration),
@@ -153,19 +154,28 @@ impl MonitorWidget {
             .ratio(ratio)
             .label(label)
     }
+    pub fn get_layout(&self) -> Layout {
+        Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([Length(6)])
+    }
+    pub fn get_box<'a>(&self) -> Block<'a>{
+        let outer_block = Block::bordered().title("Outer block");
+        outer_block
+    }
 }
 
 impl Widget for MonitorWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([Length(6)])
-            .split(area);
-        let gauge_area = layout[0];
+        let layout = self.get_layout();
 
-        let title = self.render_title("Progress Bar");
-        let gauge = self.render_gauge(title);
+        let row = layout.split(area)[0];
 
-        gauge.render(gauge_area, buf);
+        let title = self.get_title("Progress Bar");
+        let gauge = self.get_gauge(title);
+        let b_box = self.get_box();
+        let inner = b_box.inner(row);
+        gauge.render(inner, buf);
+        b_box.render(row, buf);
     }
 }
