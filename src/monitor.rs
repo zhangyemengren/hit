@@ -1,13 +1,16 @@
-use std::error::Error;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint::Length, Layout, Rect};
+use ratatui::layout::{
+    Constraint::{Length, Percentage},
+    Layout, Rect,
+};
 use ratatui::style::palette::tailwind;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Gauge, Padding, Widget};
+use ratatui::widgets::{Block, BorderType, Gauge, Padding, Widget};
 use ratatui::DefaultTerminal;
+use std::error::Error;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
@@ -47,11 +50,10 @@ impl Monitor {
 
     pub fn draw(&mut self) -> Result<(), Box<dyn Error>> {
         let widget = self.widget.clone();
-        self.terminal
-            .draw(|frame| {
-                let area = frame.area();
-                frame.render_widget(widget, area);
-            })?;
+        self.terminal.draw(|frame| {
+            let area = frame.area();
+            frame.render_widget(widget, area);
+        })?;
         Ok(())
     }
     pub fn get_receiver(&self) -> watch::Receiver<bool> {
@@ -122,15 +124,7 @@ impl MonitorWidget {
             duration,
         }
     }
-    pub fn get_title<'a>(&self, title: &'a str) -> Block<'a> {
-        let title = Line::from(title).centered();
-        Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::vertical(1))
-            .title(title)
-            .style(Style::default().fg(CUSTOM_LABEL_COLOR))
-    }
-    pub fn get_gauge<'a>(&self, title: Block<'a>) -> Gauge<'a> {
+    pub fn get_gauge<'a>(&self) -> Gauge<'a> {
         let (text, mut ratio) = match self.duration {
             Some(duration) => (
                 format!("{}/{}", self.seconds, duration),
@@ -149,33 +143,54 @@ impl MonitorWidget {
             ratio = 1.0;
         }
         Gauge::default()
-            .block(title)
             .gauge_style(Style::default().fg(GAUGE_COLOR))
             .ratio(ratio)
             .label(label)
     }
-    pub fn get_layout(&self) -> Layout {
-        Layout::default()
+    pub fn get_layout(&self) -> [Layout; 2] {
+        let outer = Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
-            .constraints([Length(6)])
+            .constraints([Length(6), Length(6)]);
+        let inner = Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([Percentage(50), Percentage(50)]);
+        [outer, inner]
     }
-    pub fn get_box<'a>(&self) -> Block<'a>{
-        let outer_block = Block::bordered().title("Outer block");
+    pub fn get_box<'a>(&self, title: &'a str) -> Block<'a> {
+        let outer_block = Block::bordered()
+            .border_type(BorderType::Thick)
+            .title(Line::from(title).centered())
+            .padding(Padding::horizontal(1));
         outer_block
     }
 }
 
 impl Widget for MonitorWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let layout = self.get_layout();
+        let [outer_layout, inner_layout] = self.get_layout();
+        let rects = outer_layout.split(area);
+        let row = rects[0];
+        let row_2_left = inner_layout.split(rects[1])[0];
+        let row_2_right = inner_layout.split(rects[1])[1];
 
-        let row = layout.split(area)[0];
-
-        let title = self.get_title("Progress Bar");
-        let gauge = self.get_gauge(title);
-        let b_box = self.get_box();
+        let gauge = self.get_gauge();
+        let b_box = self.get_box("Progress Bar");
         let inner = b_box.inner(row);
+
+        let gauge2 = self.get_gauge();
+        let b_box2 = self.get_box("Success Rate");
+        let inner2 = b_box.inner(row_2_left);
+
+        let gauge3 = self.get_gauge();
+        let b_box3 = self.get_box("Time Elapsed");
+        let inner3 = b_box.inner(row_2_right);
+
         gauge.render(inner, buf);
+        gauge2.render(inner2, buf);
+        gauge3.render(inner3, buf);
+
         b_box.render(row, buf);
+        b_box2.render(row_2_left, buf);
+        b_box3.render(row_2_right, buf);
     }
 }
