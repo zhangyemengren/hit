@@ -97,7 +97,7 @@ impl Monitor {
                     if msg.duration > self.widget.max_time {
                         self.widget.max_time = msg.duration;
                     }
-                    if msg.duration < self.widget.min_time {
+                    if msg.duration < self.widget.min_time || self.widget.min_time == 0 {
                         self.widget.min_time = msg.duration;
                     }
                 }
@@ -173,11 +173,14 @@ impl MonitorWidget {
             .label(label)
     }
     pub fn get_success_rate<'a>(&self) -> Paragraph<'a> {
+        let rate = if self.count == 0 {
+            0.0
+        } else {
+            self.success_count as f64 / self.count as f64 * 100.0
+        };
         let text = format!(
             "Success: {}/{} Success Rate: {:.2}%",
-            self.success_count,
-            self.count,
-            self.success_count as f64 / self.count as f64 * 100.0
+            self.success_count, self.count, rate
         );
         Paragraph::new(text)
     }
