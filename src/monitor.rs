@@ -8,7 +8,7 @@ use ratatui::layout::{
 use ratatui::style::palette::tailwind;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Gauge, Padding, Widget};
+use ratatui::widgets::{Block, BorderType, Gauge, Padding, Paragraph, Widget};
 use ratatui::DefaultTerminal;
 use std::error::Error;
 use std::time::{Duration, Instant};
@@ -17,10 +17,17 @@ use tokio::sync::watch;
 const CUSTOM_LABEL_COLOR: Color = tailwind::SLATE.c200;
 const GAUGE_COLOR: Color = tailwind::GREEN.c800;
 
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub duration: u64,
+    pub is_success: bool,
+    pub average_duration: u64,
+}
+
 pub struct Monitor {
     now: Instant,
     terminal: DefaultTerminal,
-    rx: UnboundedReceiver<Option<u64>>,
+    rx: UnboundedReceiver<Option<Message>>,
     inner_tx: watch::Sender<bool>,
     inner_rx: watch::Receiver<bool>,
     widget: MonitorWidget,
@@ -31,7 +38,7 @@ impl Monitor {
 
     pub fn new(
         now: Instant,
-        rx: UnboundedReceiver<Option<u64>>,
+        rx: UnboundedReceiver<Option<Message>>,
         max_count: u64,
         duration: Option<u64>,
     ) -> Self {
@@ -79,10 +86,20 @@ impl Monitor {
                 }
                 // channel
                 Some(x) = self.rx.recv() => {
-                    if let None = x{
+                    let Some(msg) = x else {
                         break;
-                    }
+                    };
                     self.widget.count += 1;
+                    self.widget.average_time = msg.average_duration;
+                    if msg.is_success {
+                        self.widget.success_count += 1;
+                    }
+                    if msg.duration > self.widget.max_time {
+                        self.widget.max_time = msg.duration;
+                    }
+                    if msg.duration < self.widget.min_time {
+                        self.widget.min_time = msg.duration;
+                    }
                 }
                 // 事件
                 Some(Ok(event)) = events.next() => {
@@ -109,6 +126,10 @@ impl Monitor {
 
 #[derive(Clone)]
 struct MonitorWidget {
+    max_time: u64,
+    min_time: u64,
+    average_time: u64,
+    success_count: u64,
     count: u64,
     seconds: u64,
     max_count: u64,
@@ -118,6 +139,10 @@ struct MonitorWidget {
 impl MonitorWidget {
     pub fn new(seconds: u64, max_count: u64, duration: Option<u64>) -> Self {
         MonitorWidget {
+            max_time: 0,
+            min_time: 0,
+            average_time: 0,
+            success_count: 0,
             count: 0,
             seconds,
             max_count,
@@ -146,6 +171,22 @@ impl MonitorWidget {
             .gauge_style(Style::default().fg(GAUGE_COLOR))
             .ratio(ratio)
             .label(label)
+    }
+    pub fn get_success_rate<'a>(&self) -> Paragraph<'a> {
+        let text = format!(
+            "Success: {}/{} Success Rate: {:.2}%",
+            self.success_count,
+            self.count,
+            self.success_count as f64 / self.count as f64 * 100.0
+        );
+        Paragraph::new(text)
+    }
+    pub fn get_time_info<'a>(&self) -> Paragraph<'a> {
+        let text = format!(
+            "Max Time: {} Min Time: {} Average Time: {}",
+            self.max_time, self.min_time, self.average_time
+        );
+        Paragraph::new(text)
     }
     pub fn get_layout(&self) -> [Layout; 2] {
         let outer = Layout::default()
@@ -177,17 +218,17 @@ impl Widget for MonitorWidget {
         let b_box = self.get_box("Progress Bar");
         let inner = b_box.inner(row);
 
-        let gauge2 = self.get_gauge();
+        let success_rate_text = self.get_success_rate();
         let b_box2 = self.get_box("Success Rate");
         let inner2 = b_box.inner(row_2_left);
 
-        let gauge3 = self.get_gauge();
+        let time_text = self.get_time_info();
         let b_box3 = self.get_box("Time Elapsed");
         let inner3 = b_box.inner(row_2_right);
 
         gauge.render(inner, buf);
-        gauge2.render(inner2, buf);
-        gauge3.render(inner3, buf);
+        success_rate_text.render(inner2, buf);
+        time_text.render(inner3, buf);
 
         b_box.render(row, buf);
         b_box2.render(row_2_left, buf);

@@ -1,4 +1,4 @@
-use crate::monitor::Monitor;
+use crate::monitor::{Message, Monitor};
 use clap::Parser;
 use reqwest::{Client, ClientBuilder};
 use std::{
@@ -58,9 +58,7 @@ impl Runner {
         let client = client.build().unwrap();
         Runner {
             now: Instant::now(),
-            client: Arc::new(
-                client
-            ),
+            client: Arc::new(client),
             semaphore: Arc::new(Semaphore::new(args.max_concurrent)),
             request_count: Arc::new(AtomicU64::new(0)),
             average_duration: Arc::new(AtomicU64::new(0)),
@@ -71,7 +69,7 @@ impl Runner {
     pub async fn run(&self) {
         let cancellation_token = CancellationToken::new();
         let mut handles = vec![];
-        let (m_tx, m_rx) = mpsc::unbounded_channel::<Option<u64>>();
+        let (m_tx, m_rx) = mpsc::unbounded_channel::<Option<Message>>();
         let duration = self.args.duration;
         let max_count = self.args.n_requests;
         let mut monitor = Monitor::new(self.now.clone(), m_rx, max_count, duration);
@@ -84,7 +82,8 @@ impl Runner {
             // 结束时 取消其他任务
             if self.is_done() {
                 cancellation_token.cancel();
-                m_tx.send(None).unwrap();
+                m_tx.send(None)
+                    .unwrap_or_else(|_| eprintln!("send None failed"));
                 break;
             }
             // 接收channel返回 原始终端只能通过monitor模块监听退出信号
@@ -95,6 +94,7 @@ impl Runner {
             let client = Arc::clone(&self.client);
             let semaphore = Arc::clone(&self.semaphore);
             let request_count = Arc::clone(&self.request_count);
+            let average_duration = Arc::clone(&self.average_duration);
             let m_tx = m_tx.clone();
             let url = self.args.url.clone();
             let token = cancellation_token.clone();
@@ -112,29 +112,35 @@ impl Runner {
                     _ = token.cancelled() => {}
                     _ = async {
                         // 限制并发数
-                        let _permit = semaphore.acquire().await.unwrap();
+                        let _permit = semaphore.acquire().await.expect("semaphore acquire failed");
                         request_count.fetch_add(1, Ordering::SeqCst);
                         let start = Instant::now();
-                        match client.get(url)
+                        let is_success = client.get(url)
                             .send()
-                            .await{
-                            _ => {},
-                        }
+                            .await.is_ok();
                         let duration = start.elapsed().as_millis() as u64;
-                        tx.send(duration).unwrap();
-                        m_tx.send(Some(1)).unwrap();
+                        tx.send(duration).expect("send duration failed");
+                        let mut average_duration = average_duration.load(Ordering::SeqCst);
+                        if average_duration == 0 {
+                            average_duration = duration;
+                        }
+                        m_tx.send(Some(Message{
+                            duration,
+                            is_success,
+                            average_duration,
+                        })).unwrap_or_else(|_| eprintln!("send Message failed"));
                         drop(_permit);
                     } => {}
                 }
             });
-            let duration = rx.recv().await.unwrap();
+            let duration = rx.recv().await.expect("get duration failed");
             self.set_average_duration(duration);
             handles.push(handle);
         }
         for handle in handles {
-            handle.await.unwrap();
+            handle.await.expect("Task panicked");
         }
-        m_handle.await.unwrap();
+        m_handle.await.expect("m_handle panicked");
         println!("Done! Duration: {:?}", self.now.elapsed());
     }
     fn is_done(&self) -> bool {
