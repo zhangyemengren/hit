@@ -1,6 +1,6 @@
 [package]
 name = "zymrhit"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["624593758@qq.com"]
 description = "http load generator"
